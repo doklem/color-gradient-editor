@@ -31,7 +31,7 @@ export class Settings {
     exportFolder.add(this, 'exportHeight', 1, 8192, 1).name('Height');
     exportFolder.add(this, 'exportQuality', 0, 1, 0.01).name('Quality');
 
-    this.colorsFolder = this.gui.addFolder('Colors').onChange(() => this.applySettings());
+    this.colorsFolder = this.gui.addFolder('Colors');
     this.colorsFolder.add(this, 'addStop').name('Add');
 
     let stop = new GradientStop({ id: 1, percentage: 0, color: { r: 0, g: 0, b: 1 } });
@@ -82,8 +82,8 @@ export class Settings {
   }
 
   private createFolderForStop(stop: GradientStop): void {
-    const folder = this.colorsFolder.addFolder(`Color ${stop.id}`);
-    folder.add(stop, 'percentage', -100, 200, 0.1).name('Percentage');
+    const folder = this.colorsFolder.addFolder(`Color ${stop.id}`).onChange(() => this.applySettings());
+    folder.add(stop, 'percentage').name('Percentage');
     folder.addColor(stop, 'color').name('Color');
     folder.add({
       delete: () => {
