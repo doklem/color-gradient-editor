@@ -2,7 +2,7 @@
 A lightweight web application for creating linear color gradients: [https://doklem.github.io/color-gradient-editor](https://doklem.github.io/color-gradient-editor)
 
 ## How To Use It
-Add as many colors as you want to the linear gradient. Each color can be positioned between -100 and 200 percent.
+Add as many colors as you want to the linear gradient. Each color can be positioned from the left to the right with a percentage.
 
 Your gradient settings can be stored in a JSON file to make working on it over time possible.
 

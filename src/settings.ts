@@ -83,7 +83,7 @@ export class Settings {
 
   private createFolderForStop(stop: GradientStop): void {
     const folder = this.colorsFolder.addFolder(`Color ${stop.id}`);
-    folder.add(stop, 'percentage', -100, 200, 0.1).name('Percentage');
+    folder.add(stop, 'percentage').name('Percentage');
     folder.addColor(stop, 'color').name('Color');
     folder.add({
       delete: () => {
