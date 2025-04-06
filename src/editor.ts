@@ -1,5 +1,5 @@
-import { BufferAttribute, Mesh, OrthographicCamera, PlaneGeometry, Scene } from 'three';
-import { MeshBasicNodeMaterial, WebGPURenderer } from 'three/webgpu';
+import { BufferAttribute, DynamicDrawUsage, Mesh, OrthographicCamera, PlaneGeometry, Scene } from 'three';
+import { NodeMaterial, WebGPURenderer } from 'three/webgpu';
 import { Settings } from './settings';
 import { attribute, Fn, vec4 } from 'three/tsl';
 import { GradientStop } from './gradient-stop';
@@ -7,6 +7,7 @@ import { GradientStop } from './gradient-stop';
 export class Editor {
 
   private static readonly CLIP_SPACE_SIZE = 2;
+  private static readonly CLIP_SPACE_CENTER = 0;
   private static readonly CLIP_SPACE_SIZE_HALF = Editor.CLIP_SPACE_SIZE * 0.5;
   private static readonly CLIP_SPACE_SIZE_PERCENT = Editor.CLIP_SPACE_SIZE * 0.01;
   private static readonly CLIP_SPACE_POSITION_ATTRIBUTE = 'clipSpacePosition';
@@ -15,11 +16,17 @@ export class Editor {
   private readonly scene: Scene;
   private readonly camera: OrthographicCamera;
   private readonly renderer: WebGPURenderer;
-  private readonly material: MeshBasicNodeMaterial;
+  private readonly material: NodeMaterial;
 
-  private mesh?: Mesh<PlaneGeometry, MeshBasicNodeMaterial>;
+  private mesh?: Mesh<PlaneGeometry, NodeMaterial>;
+  private colorAttribute: BufferAttribute;
+  private clipSpacePositionAttribute: BufferAttribute;
+  private gradientStopCount = 0;
 
   public constructor(private readonly canvas: HTMLCanvasElement) {
+    this.colorAttribute = new BufferAttribute(new Float32Array(), 3).setUsage(DynamicDrawUsage);
+    this.clipSpacePositionAttribute = new BufferAttribute(new Float32Array(), 2).setUsage(DynamicDrawUsage);
+
     this.renderer = new WebGPURenderer({
       antialias: true,
       canvas
@@ -39,12 +46,12 @@ export class Editor {
 
     this.scene = new Scene();
 
-    this.material = new MeshBasicNodeMaterial();
+    this.material = new NodeMaterial();
     this.material.colorNode = Fn(() => {
       return vec4(attribute(Editor.COLOR_ATTRIBUTE, 'vec3'), 1);
     })();
     this.material.vertexNode = Fn(() => {
-      return vec4(attribute(Editor.CLIP_SPACE_POSITION_ATTRIBUTE, 'vec2'), 0, 1);
+      return vec4(attribute(Editor.CLIP_SPACE_POSITION_ATTRIBUTE, 'vec2'), Editor.CLIP_SPACE_CENTER, 1);
     })();
   }
 
@@ -53,31 +60,27 @@ export class Editor {
       return;
     }
 
-    if (this.mesh) {
-      this.scene.remove(this.mesh);
-    }
-
     const gradientStops: GradientStop[] = [];
     settings.stops.forEach(stop => gradientStops.push(stop));
     gradientStops.sort(GradientStop.compare);
 
-    const colorBuffer: number[] = [];
-    const clipSpacePositionBuffer: number[] = [];
+    const colors: number[] = [];
+    const clipSpacePositions: number[] = [];
     // Upper row of vertices
     gradientStops.forEach(
-      (stop: GradientStop, index: number) => Editor.applyGradientStopToVertexRow(stop, index, gradientStops.length, colorBuffer, clipSpacePositionBuffer, Editor.CLIP_SPACE_SIZE_HALF)
+      (stop: GradientStop, index: number) => Editor.applyGradientStopToVertexRow(stop, index, gradientStops.length, colors, clipSpacePositions, Editor.CLIP_SPACE_SIZE_HALF)
     );
     // Lower row of vertices
     gradientStops.forEach(
-      (stop: GradientStop, index: number) => Editor.applyGradientStopToVertexRow(stop, index, gradientStops.length, colorBuffer, clipSpacePositionBuffer, -Editor.CLIP_SPACE_SIZE_HALF)
+      (stop: GradientStop, index: number) => Editor.applyGradientStopToVertexRow(stop, index, gradientStops.length, colors, clipSpacePositions, -Editor.CLIP_SPACE_SIZE_HALF)
     );
 
-    const geometry = new PlaneGeometry(Editor.CLIP_SPACE_SIZE, Editor.CLIP_SPACE_SIZE, gradientStops.length + 1, 1);
-    geometry.setAttribute(Editor.COLOR_ATTRIBUTE, new BufferAttribute(new Float32Array(colorBuffer), 3));
-    geometry.setAttribute(Editor.CLIP_SPACE_POSITION_ATTRIBUTE, new BufferAttribute(new Float32Array(clipSpacePositionBuffer), 2))
+    if (this.gradientStopCount === gradientStops.length) {
+      this.update(colors, clipSpacePositions);
+    } else {
+      this.rebuild(gradientStops.length, colors, clipSpacePositions);
+    }
 
-    this.mesh = new Mesh(geometry, this.material);
-    this.scene.add(this.mesh);
     requestAnimationFrame(async () => await this.renderer.renderAsync(this.scene, this.camera));
   }
 
@@ -100,30 +103,52 @@ export class Editor {
     });
   }
 
+  private update(colors: number[], clipSpacePositions: number[]): void {
+    this.colorAttribute.set(colors);
+    this.clipSpacePositionAttribute.set(clipSpacePositions);
+  }
+
+  private rebuild(count: number, colors: number[], clipSpacePositions: number[]): void {
+    if (this.mesh) {
+      this.scene.remove(this.mesh);
+    }
+
+    this.colorAttribute = new BufferAttribute(new Float32Array(colors), 3).setUsage(DynamicDrawUsage);
+    this.clipSpacePositionAttribute = new BufferAttribute(new Float32Array(clipSpacePositions), 2).setUsage(DynamicDrawUsage);
+    const geometry = new PlaneGeometry(Editor.CLIP_SPACE_SIZE, Editor.CLIP_SPACE_SIZE, count + 1, 1);
+    geometry.setAttribute(Editor.COLOR_ATTRIBUTE, this.colorAttribute);
+    geometry.setAttribute(Editor.CLIP_SPACE_POSITION_ATTRIBUTE, this.clipSpacePositionAttribute)
+
+    this.mesh = new Mesh(geometry, this.material);
+    this.scene.add(this.mesh);
+
+    this.gradientStopCount = count;
+  }
+
   private static applyGradientStopToVertexRow(
     stop: GradientStop,
     index: number,
     gardientStopsCount: number,
-    colorBuffer: number[],
-    clipSpacePositionBuffer: number[],
+    colors: number[],
+    clipSpacePositions: number[],
     y: number): void {
     const x = stop.percentage * Editor.CLIP_SPACE_SIZE_PERCENT - Editor.CLIP_SPACE_SIZE_HALF
 
     if (index === 0) {
-      stop.writeColor(colorBuffer);
-      clipSpacePositionBuffer.push(Math.min(-Editor.CLIP_SPACE_SIZE_HALF, x));
-      clipSpacePositionBuffer.push(y);
+      stop.writeColor(colors);
+      clipSpacePositions.push(Math.min(-Editor.CLIP_SPACE_SIZE_HALF, x));
+      clipSpacePositions.push(y);
     }
 
-    clipSpacePositionBuffer.push(x);
-    clipSpacePositionBuffer.push(y);
+    clipSpacePositions.push(x);
+    clipSpacePositions.push(y);
 
     if (index === gardientStopsCount - 1) {
-      stop.writeColor(colorBuffer);
-      clipSpacePositionBuffer.push(Math.max(Editor.CLIP_SPACE_SIZE_HALF, x));
-      clipSpacePositionBuffer.push(y);
+      stop.writeColor(colors);
+      clipSpacePositions.push(Math.max(Editor.CLIP_SPACE_SIZE_HALF, x));
+      clipSpacePositions.push(y);
     }
 
-    stop.writeColor(colorBuffer);
+    stop.writeColor(colors);
   }
 }
